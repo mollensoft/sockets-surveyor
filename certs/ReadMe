@@ -1,0 +1,1 @@
+This folder contains default TLS Certificates to enable testing of the application; Please replace them with your own generated, self signed or other certificates when feasible.
