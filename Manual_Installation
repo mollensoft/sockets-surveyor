@@ -1,0 +1,124 @@
+
+Manual SocketsSurveyor Installation Documentation 
+
+We'll soon have a Docker Image ready to share which will enable everyone to avoid using this method install a running system 
+
+This installation has been tested on Ubuntu 18.04 but the installation should work on other linux distros as well and takes about 1.5 hours - it consist mostly of installing perl modules, mysql, creating databases and tables, configuring the 7 perl scripts with appropriate variables and thats it.
+
+Log in to your Linux host and start by downloading socketssurveyor from the github repository, you can do that in a linux terminal using a command like:
+ 
+"git clone https://github.com/mollensoft/socketsSurveyor.git"  -- this fetches scripts, directory structures and an sql file for building mysql database, tables and structures into a local directory like "/home/username/socketssurveyor" - from here forward we'll use "socketssurveyor" as our working directory 
+
+You should now see a few subdirectories and perl scripts within socketssurveyor directory. Below is a brief overview of what each of the perl scripts do. In later steps you must update the configuration variables at the top of each script prior to running each script in a linux terminal (see running system picture):
+
+	1. ss_daily_reporter.pl - Queries the Mysql Database for interesting events and correlations and then email them out to a distribution for situational awareness or further analysis
+
+	2. ss_deltabytes_alerter.pl  - Performs SQL Queries looking for conditions where outbound bytes exchanged between communicants exceeds inbound bytes threshold is met or exceeded then sends Email Alert to the configured recipient
+
+	3. ss_gearman_event_worker.pl  - Receives Rflow Events from the Rflow Receiver Daemon and Processes them - Runs as instances of Gearman Clients so you can run as many as needed to load balance a high number of events to process. Performs basic Enrichment of Ip addresses by looking up basic information about them and adding it to the event row in the database - also in dire need of refactoring, a symptom of growing over many months.
+
+	4. ss_gearman_reputation_worker.pl  - A very simple processor to fetch reputation data about an IP address, Requires you to have your own, free, Virustotal API Key as these attributes contribute to the overall reputation calculation. They are easy to get, just sign up for a virustotal account and use the free or paid API Token
+
+	5. ss_Rflow_rcvrd.pl  - receives UDP Rflow event (Netflow Version 5) Packets from your router and send them through the SocketsSurveyor analysis system for further processing and enrichment Thanks to David Farrell for the inspiration as this is an expansion of original concept code found in his perl blog post
+
+	6. ss_watcher_worker.pl - Performs SQL Queries looking for Outbound Size thresholds to be met and sends Email Alert
+
+	7. ss_httpd.pl  - SocketsSurveyor Web Server Daemon - Uses the Mojolious framework to act as HTTP Server - in production, recommend using self-signed SSL/TLS certs for security -- Do Not Expose directly to the Internet! This script serves as the Analyst Portal Interface where users log in and perform analysis of Netflow events capture and enriched by the SocketsSurveyor System
+
+Most modern Linux distros already have a modern version of perl installed but you will also need to install additional perl modules and a few dependancies to ensure socketssurveyor works properly - heres a list of commands to run in order to ensure you have the right dependancies installed: 
+
+sudo cpan App::cpanminus
+sudo cpanm Mojolicious 
+sudo cpanm DBI
+sudo cpanm Crpyt::PBKDF2
+sudo cpanm Net::Telnet::Gearman
+sudo cpanm Data::Dumper
+sudo cpanm Data::Validate::IP
+sudo cpanm DateTime::Format::MySQL
+sudo cpanm Mojolicious::Plugin::Status
+sudo cpanm Email::Sender::Simple
+sudo cpanm Email::Sender::Transport::SMTPS
+sudo cpanm Email::Simple
+sudo cpanm Email::Simple::Creator
+sudo cpanm Text::Table::Tiny
+sudo cpanm Gearman::Worker
+sudo cpanm WWW::ipinfo
+sudo cpanm GeoIP2::Database::Reader
+sudo cpanm IO::Socket::INET
+sudo cpanm Data::Netflow
+sudo cpanm Gearman::Client
+sudo cpanm LWP::UserAgent
+sudo cpanm JSON
+sudo apt-get install libdbd-mysql-perl
+sudo apt install dnsutils
+sudo apt install whois
+
+Okay, now lets install Mysql Database Server and configure it, here's the commands:
+
+	sudo apt install mysql-server
+
+	sudo mysql_secure_installation (recommend you do NOT turn on maximum security for testing this software - just answer "no" to the secure install questions)
+
+	Now we have to edit the Mysql Config or it will throw errors on some of the sqlqueries 
+		Edit the server config by typing "sudo nano /etc/mysql/my.cnf"
+			Add the following two lines to the bottom of the file:
+
+				[mysqld]
+				sql_mode = STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_AUTO_CREATE_USER,NO_ENGINE_SUBSTITUTION
+
+			Now save and close the file - finally, you must restart the mysql database server for the changes to take effect - do that by running this command "sudo service mysql restart" 
+	
+	Now lets create a mysql database user for use in the perl scripts so the scripts can do work and update the database:
+	
+		First, Log In to Mysql by executing a command in a terminal like: "mysql -u root" or if you configured a password during installation use a command like "mysql -u root -p" and it will prompt you for the password you configured when you installed the mysql server. Now create a database user that we can put into the perl scripts by typing these commands into the terminal after logging into mysql as root:
+
+		CREATE USER 'rick'@'localhost' IDENTIFIED BY '2!sTurKs';
+		
+		GRANT ALL PRIVILEGES ON *.* TO 'rick'@'localhost' WITH GRANT OPTION;
+		
+	Now Create database tables and structures in the Mysql Database Server by pasteing the contents of the file sql_db-tables_create_V1.sql into the terminal when you are still logged in to mysql as "rick" or root. This should build necessary tables and databases
+	
+Now Fetch, then extract the free geodatabase From MaxMind and put it in the "/home/username/socketssurveyor/geolibs/current" folder like this in a terminal window, the system uses this database to enrich IP address information: 
+
+	While in a Terminal window in your /home/username/socketssurveyor/geolibs directory, Download the current Geolib from Maxmind like this:
+
+	"curl -o GeoLite2-City.tar.gz http://geolite.maxmind.com/download/geoip/database/GeoLite2-City.tar.gz"
+		where GeoLite2-City.tar.gz is the output file name - this will download the GeoLite2-City.tar.gz into the geolibs directory 
+	
+	Now we need to decompress and untar the file using this command: "tar -xzf GeoLite2-City.tar.gz" and you will see a new subdirectory created named GeoLite2-City_YYYYMMDD (the YYYMMDD will reflect the current Date)
+	
+	Copy the GeoLite2-City.mmdb into the proper location so the scripts can use it to look up information: "/home/username/socketssurveyor/geolibs/current" folder using a command like:
+	"cp /home/username/socketssurveyor/geolibs/GeoLite2-City_YYYYMMDD/GeoLite2-City.mmdb /home/username/socketssurveyor/geolibs/current" 
+
+Now we must configure the top of each of the seven perl scripts with usernames, passwords for accessing the mysql database and email credentials for sending alert and report emails  
+	
+	1. Mysql Database Server (again, use whatever username and password you created above (in our example we used mysql username "rick" and password "2!sTurKs")) 
+	
+	2. We now need to configure Email accounts, Usernames and Passwords to enable the sending of email alerts and reports - You need to 1) specify an email account to send from 2) an email account to be the recipient 3) and the email server details that will allow the script to connect and send emails using TLS encryption. Below are examples lines that need configuring found at the top of each script that currently contain sample passwords and credentials 
+	
+			my $smtpserver   = 'securesmtp.net';		          		# email server SMTP Server
+			my $smtpport     = 465;                               		# smtp port 
+			my $smtpuser     = 'messenger@sendersdomain.com';  			# smtp username
+			my $smtppassword = 'KxU1S2NcF2Baw^hs';              		# smtp password
+			my $email_to_address = "recipient\@receiversdomain.com";    # email receivers address
+			my $email_from_address = "messenger\@sendersdomain.com";	# report sender script (this script) email address to send from
+
+	3. The ss_gearman_reputation_worker.pl requires a VirustTotal api key to work properly - the system uses virustotal to enable enrichment - you need to have your own API Key - Its pretty easy to create a free account at virustotal.com and get your API key from within the users profile information found in the account details. here is an example of what the API Key line looks like found at the top of the ss_gearman_reputation_worker.pl script  - be sure to replace the API Key with your own, this is just an example and will not work.
+	
+		my $virustotal_api_key = 'c458f10a85e43a11b883524190cfc1567c49597047bab7bf3172c7c0fc8f0cb9'; # This is your API Key from Virus total, needed to lookup Reputation data per IP address
+
+	4. In the ss_gearman_event_worker.pl script, you must set the "$internal_iprange" variable to the ip address range that your internal network clients are operating on. This is typically a 192.168.X.X or a 10.0.X.X type network address schema for internal networks. The scripts use this information to determine if network traffic is outbound, inbound or intranet only.  
+	
+		$internal_iprange = "192.168";   # this is your internal network range, the processor needs to know what is your internal network so it knows whats outbound or internal traffic to prosecute 
+
+You should now be able to start the ss_httpd.pl script from the command line using the command below (or one of the examples found at the top of the script itself) - to do so, navigate to the socketssurveyor directory in a terminal and execute this command on the command line:
+
+"sudo ./ss_httpd.pl prefork -m production -w 10 -c 1 -H 900 -G 900 -i 900 -l 'https://*:443?cert=certs/mollensoft.crt&key=certs/mollensoft.key' & "
+
+The best way to run the remaining 6 perl scripts is to execute each of them seperatly in a terminal window (example: "perl ss_deltabytes_alerter.pl &"). The self signed certificates are provided to enable testing of the capability.
+
+Although the ss_httpd.pl script can start and stop the scripts using the controls in the control panel it greatly reduces the 6 scripts speed and efficiency which is why it is recommended to start each of the remaining scripts separately, each in their own terminal  
+
+If you have all seven scripts running in their own terminal windows your system is ready to receive RFLOW (Netflow V5) data on port 2055. So start sending the netflow packets to socketssurveyor and the system will start processing them accordingly.
+
+After the system starts receiving packets users can connect to the running ss_httpd.pl script via a web browser (https://yourserveripaddress) to log in as user "analyst" password "pass1" and start analyzing your internal network traffic activities.
