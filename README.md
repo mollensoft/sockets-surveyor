@@ -66,5 +66,9 @@ Email Reports and Alerts:
 
 ![alt text](https://github.com/mollensoft/sockets-surveyor/blob/master/public/Slide17.JPG)
 
+![alt text](https://github.com/mollensoft/sockets-surveyor/blob/master/public/Slide9.JPG)
 
+![alt text](https://github.com/mollensoft/sockets-surveyor/blob/master/public/Slide11.JPG)
+
+![alt text](https://github.com/mollensoft/sockets-surveyor/blob/master/public/Slide12.JPG)
 
